@@ -57,3 +57,41 @@ export function parseTimeRange(range: string): TimeRange {
       `Use formats like "5m", "1h", "7d", or "last 30 minutes".`
   );
 }
+
+/**
+ * Resolve a data query's time window without changing legacy relative-time behavior.
+ * A fixed window is supplied as Unix epoch milliseconds, not seconds.
+ *
+ * Reject incomplete or mixed modes before any WhaTap API call; otherwise a
+ * PRE_FIX_VERIFY/FINAL_VERIFY replay could accidentally query a moving window.
+ */
+export function resolveQueryTimeRange(input: {
+  timeRange?: string;
+  stime?: number;
+  etime?: number;
+}): TimeRange {
+  const hasStart = input.stime !== undefined;
+  const hasEnd = input.etime !== undefined;
+  if (hasStart || hasEnd) {
+    if (!hasStart || !hasEnd) {
+      throw new Error('stime and etime must both be supplied for an absolute time window.');
+    }
+    if (input.timeRange !== undefined) {
+      throw new Error('timeRange cannot be combined with stime/etime. Choose one time mode.');
+    }
+    const { stime, etime } = input;
+    if (
+      typeof stime !== 'number' ||
+      typeof etime !== 'number' ||
+      !Number.isSafeInteger(stime) ||
+      !Number.isSafeInteger(etime) ||
+      stime < 0 ||
+      etime < 0 ||
+      stime >= etime
+    ) {
+      throw new Error('stime/etime must be nonnegative safe-integer Unix milliseconds with stime < etime.');
+    }
+    return { stime, etime };
+  }
+  return parseTimeRange(input.timeRange ?? '5m');
+}

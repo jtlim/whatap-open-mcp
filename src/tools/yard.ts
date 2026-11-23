@@ -6,7 +6,7 @@ import type { McpServer } from "../mcp/server.js";
 import type { WhatapApiClient } from "../api/client.js";
 import { formatMxqlResponse } from "../utils/format.js";
 import { formatPromqlResponse, formatOpenMetricsList } from "../utils/format-promql.js";
-import { parseTimeRange } from "../utils/time.js";
+import { resolveQueryTimeRange } from "../utils/time.js";
 import {
   PARAM_PROJECT_CODE,
   PARAM_TIME_RANGE_OPTIONAL,
@@ -29,6 +29,7 @@ import {
 import { simplifyRawMxql } from "../utils/simplify-mxql.js";
 import {
   classifyAndBuildError,
+  buildErrorResponse,
   appendNextSteps,
   buildNoDataResponse,
   buildServerErrorResponse,
@@ -1008,7 +1009,10 @@ export function registerYardTools(
       'Pass params for MXQL queries that accept $-prefixed variables. Use the variable name as ' +
       'the key: params={"$oid": "12345", "$field": "gc_time"} (a bare "oid" is accepted too). ' +
       "Call whatap_describe_query(path) first — a query whose SELECT contains $field returns no " +
-      "metric column until you supply it.",
+      "metric column until you supply it.\n\n" +
+      "TIME WINDOW: omit all time fields for the latest 5m; use timeRange=\"1h\" for a relative " +
+      "window, OR provide both stime and etime as Unix milliseconds for a replayable " +
+      "fixed window. Never mix timeRange and stime/etime.",
     {
       projectCode: z.number().describe(PARAM_PROJECT_CODE),
       path: z.string().optional().describe(PARAM_MXQL_PATH),
@@ -1028,8 +1032,16 @@ export function registerYardTools(
         ),
       timeRange: z
         .string()
-        .default("5m")
-        .describe(PARAM_TIME_RANGE_OPTIONAL),
+        .optional()
+        .describe(PARAM_TIME_RANGE_OPTIONAL + " Mutually exclusive with stime/etime."),
+      stime: z
+        .number()
+        .optional()
+        .describe("Absolute UTC start as Unix epoch milliseconds; must be paired with etime. Do not supply timeRange."),
+      etime: z
+        .number()
+        .optional()
+        .describe("Absolute UTC end as Unix epoch milliseconds; must be greater than stime."),
       params: z
         .record(z.string())
         .optional()
@@ -1041,7 +1053,24 @@ export function registerYardTools(
         .default(100)
         .describe("Maximum rows to return (default: 100)."),
     },
-    async ({ projectCode, path, query, savedQuery, timeRange, params, limit }) => {
+    async ({ projectCode, path, query, savedQuery, timeRange, stime: absoluteStart, etime: absoluteEnd, params, limit }) => {
+      // Validate time mode before resolving saved queries or contacting the API.
+      // In particular, the legacy 5m default is applied *only* when neither
+      // explicit absolute nor relative arguments were supplied.
+      let selectedWindow: { stime: number; etime: number };
+      try {
+        selectedWindow = resolveQueryTimeRange({
+          timeRange,
+          stime: absoluteStart,
+          etime: absoluteEnd,
+        });
+      } catch (err) {
+        return buildErrorResponse({
+          message: (err as Error).message,
+          hint: 'Use either timeRange (e.g. "5m"), or both stime and etime in Unix milliseconds.',
+          retryable: false,
+        });
+      }
       // ── Resolve saved query ──
       if (savedQuery) {
         const saved = getPromqlQueryStore().get(projectCode, savedQuery);
@@ -1069,7 +1098,7 @@ export function registerYardTools(
       // ── PromQL execution mode ──
       if (query && !path) {
         try {
-          const { stime, etime } = parseTimeRange(timeRange);
+          const { stime, etime } = selectedWindow;
           const result = await client.executePromql(projectCode, {
             query,
             stime,
@@ -1158,7 +1187,7 @@ export function registerYardTools(
       }
 
       try {
-        const { stime, etime } = parseTimeRange(timeRange);
+        const { stime, etime } = selectedWindow;
 
         // Local catalog priority: if raw MXQL exists in catalog, use text endpoint
         const catalogInfo = describeMql(path);

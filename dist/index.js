@@ -16829,6 +16829,24 @@ function parseTimeRange(range) {
     `Invalid time range format: "${range}". Use formats like "5m", "1h", "7d", or "last 30 minutes".`
   );
 }
+function resolveQueryTimeRange(input) {
+  const hasStart = input.stime !== void 0;
+  const hasEnd = input.etime !== void 0;
+  if (hasStart || hasEnd) {
+    if (!hasStart || !hasEnd) {
+      throw new Error("stime and etime must both be supplied for an absolute time window.");
+    }
+    if (input.timeRange !== void 0) {
+      throw new Error("timeRange cannot be combined with stime/etime. Choose one time mode.");
+    }
+    const { stime, etime } = input;
+    if (typeof stime !== "number" || typeof etime !== "number" || !Number.isSafeInteger(stime) || !Number.isSafeInteger(etime) || stime < 0 || etime < 0 || stime >= etime) {
+      throw new Error("stime/etime must be nonnegative safe-integer Unix milliseconds with stime < etime.");
+    }
+    return { stime, etime };
+  }
+  return parseTimeRange(input.timeRange ?? "5m");
+}
 
 // src/data/mxql-comment-translations.ts
 var MXQL_COMMENT_TRANSLATIONS = {
@@ -47755,7 +47773,7 @@ Verify the metric exists: \`whatap_data_availability(projectCode=${projectCode})
   );
   server.tool(
     "whatap_query_data",
-    'Execute a data query. Call this directly when you know the projectCode \u2014 no prerequisite tools needed.\n\nTHREE MODES:\n- MXQL: whatap_query_data(projectCode=X, path="v2/sys/server_base")\n- PromQL: whatap_query_data(projectCode=X, query="rate(node_cpu[5m])")\n- Saved: whatap_query_data(projectCode=X, savedQuery="CPU by Pod")\n\nCOMMON PATHS (use directly \u2014 no need to call data_availability or describe_query first):\n- Server: cpu/mem/disk/net \u2192 v2/sys/server_base, v2/sys/server_disk, v2/sys/server_network\n- APM: tps/response/error \u2192 v2/app/tps_pcode, v2/app/resp_time_pcode, v2/app/tx_error_pcode\n- APM per agent: \u2192 v2/app/tps_oid, v2/app/resp_time_oid, v2/app/act_tx/act_tx_oid\n- K8s: pods/nodes/events \u2192 v2/container/kube_pod, v2/container/kube_node, v2/container/kube_event\n- Container: \u2192 v2/container/container_stat\n- DB active sessions: \u2192 v2/db/instance_active_session\n- DB SQL stats: \u2192 db_oracle_dma_sqlstat_top_elapse, db_postgresql_sqlstat_top_elapse, db_mysql_sqlstat_top_elapse\n\nIf the path returns no data, THEN call data_availability(projectCode=X) to find the right path.\n\nPass params for MXQL queries that accept $-prefixed variables. Use the variable name as the key: params={"$oid": "12345", "$field": "gc_time"} (a bare "oid" is accepted too). Call whatap_describe_query(path) first \u2014 a query whose SELECT contains $field returns no metric column until you supply it.',
+    'Execute a data query. Call this directly when you know the projectCode \u2014 no prerequisite tools needed.\n\nTHREE MODES:\n- MXQL: whatap_query_data(projectCode=X, path="v2/sys/server_base")\n- PromQL: whatap_query_data(projectCode=X, query="rate(node_cpu[5m])")\n- Saved: whatap_query_data(projectCode=X, savedQuery="CPU by Pod")\n\nCOMMON PATHS (use directly \u2014 no need to call data_availability or describe_query first):\n- Server: cpu/mem/disk/net \u2192 v2/sys/server_base, v2/sys/server_disk, v2/sys/server_network\n- APM: tps/response/error \u2192 v2/app/tps_pcode, v2/app/resp_time_pcode, v2/app/tx_error_pcode\n- APM per agent: \u2192 v2/app/tps_oid, v2/app/resp_time_oid, v2/app/act_tx/act_tx_oid\n- K8s: pods/nodes/events \u2192 v2/container/kube_pod, v2/container/kube_node, v2/container/kube_event\n- Container: \u2192 v2/container/container_stat\n- DB active sessions: \u2192 v2/db/instance_active_session\n- DB SQL stats: \u2192 db_oracle_dma_sqlstat_top_elapse, db_postgresql_sqlstat_top_elapse, db_mysql_sqlstat_top_elapse\n\nIf the path returns no data, THEN call data_availability(projectCode=X) to find the right path.\n\nPass params for MXQL queries that accept $-prefixed variables. Use the variable name as the key: params={"$oid": "12345", "$field": "gc_time"} (a bare "oid" is accepted too). Call whatap_describe_query(path) first \u2014 a query whose SELECT contains $field returns no metric column until you supply it.\n\nTIME WINDOW: omit all time fields for the latest 5m; use timeRange="1h" for a relative window, OR provide both stime and etime as Unix milliseconds for a replayable fixed window. Never mix timeRange and stime/etime.',
     {
       projectCode: z.number().describe(PARAM_PROJECT_CODE),
       path: z.string().optional().describe(PARAM_MXQL_PATH),
@@ -47765,13 +47783,29 @@ Verify the metric exists: \`whatap_data_availability(projectCode=${projectCode})
       savedQuery: z.string().optional().describe(
         'Name of a saved PromQL query (created with whatap_create_promql). Example: "CPU by Pod"'
       ),
-      timeRange: z.string().default("5m").describe(PARAM_TIME_RANGE_OPTIONAL),
+      timeRange: z.string().optional().describe(PARAM_TIME_RANGE_OPTIONAL + " Mutually exclusive with stime/etime."),
+      stime: z.number().optional().describe("Absolute UTC start as Unix epoch milliseconds; must be paired with etime. Do not supply timeRange."),
+      etime: z.number().optional().describe("Absolute UTC end as Unix epoch milliseconds; must be greater than stime."),
       params: z.record(z.string()).optional().describe(
         'Query parameters for MXQL $-prefixed variables. Example: {"oid": "12345", "okind": "myApp"}'
       ),
       limit: z.number().default(100).describe("Maximum rows to return (default: 100).")
     },
-    async ({ projectCode, path, query, savedQuery, timeRange, params, limit }) => {
+    async ({ projectCode, path, query, savedQuery, timeRange, stime: absoluteStart, etime: absoluteEnd, params, limit }) => {
+      let selectedWindow;
+      try {
+        selectedWindow = resolveQueryTimeRange({
+          timeRange,
+          stime: absoluteStart,
+          etime: absoluteEnd
+        });
+      } catch (err) {
+        return buildErrorResponse({
+          message: err.message,
+          hint: 'Use either timeRange (e.g. "5m"), or both stime and etime in Unix milliseconds.',
+          retryable: false
+        });
+      }
       if (savedQuery) {
         const saved = getPromqlQueryStore().get(projectCode, savedQuery);
         if (!saved) {
@@ -47796,7 +47830,7 @@ Create new queries with \`whatap_create_promql\`.`
       }
       if (query && !path) {
         try {
-          const { stime, etime } = parseTimeRange(timeRange);
+          const { stime, etime } = selectedWindow;
           const result = await client.executePromql(projectCode, {
             query,
             stime,
@@ -47874,7 +47908,7 @@ Create new queries with \`whatap_create_promql\`.`
         };
       }
       try {
-        const { stime, etime } = parseTimeRange(timeRange);
+        const { stime, etime } = selectedWindow;
         const catalogInfo = describeMql(path);
         const rawMxql = catalogInfo?.raw;
         if (rawMxql) {
