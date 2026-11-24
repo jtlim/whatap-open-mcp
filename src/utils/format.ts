@@ -1,3 +1,4 @@
+import { formatQueryPeriod } from "./query-period.js";
 import type { ResultSemantics } from "./semantic.js";
 import { formatSemanticHeader } from "./semantic.js";
 import {
@@ -108,7 +109,7 @@ export function formatMxqlResponse(
     // Period
     if (queryMeta) {
       lines.push(
-        `**Period**: ${fmtTime(queryMeta.stime)} → ${fmtTime(queryMeta.etime)}`
+        formatQueryPeriod(queryMeta)
       );
     }
 
@@ -199,7 +200,7 @@ export function formatMxqlResponse(
   } else if (data && typeof data === "object") {
     if (queryMeta) {
       lines.push(
-        `**Period**: ${fmtTime(queryMeta.stime)} → ${fmtTime(queryMeta.etime)}`,
+        formatQueryPeriod(queryMeta),
         ""
       );
     }

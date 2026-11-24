@@ -6,7 +6,7 @@ import type { McpServer } from "../mcp/server.js";
 import type { WhatapApiClient } from "../api/client.js";
 import { formatMxqlResponse } from "../utils/format.js";
 import { formatPromqlResponse, formatOpenMetricsList } from "../utils/format-promql.js";
-import { parseTimeRange } from "../utils/time.js";
+import { FIXED_QUERY_EXAMPLE, parseQueryPeriod } from "../utils/query-period.js";
 import {
   PARAM_PROJECT_CODE,
   PARAM_TIME_RANGE_OPTIONAL,
@@ -1029,7 +1029,8 @@ export function registerYardTools(
       timeRange: z
         .string()
         .default("5m")
-        .describe(PARAM_TIME_RANGE_OPTIONAL),
+        .describe(PARAM_TIME_RANGE_OPTIONAL +
+          ` Fixed UTC start/end intervals are supported, e.g. "${FIXED_QUERY_EXAMPLE}".`),
       params: z
         .record(z.string())
         .optional()
@@ -1069,7 +1070,7 @@ export function registerYardTools(
       // ── PromQL execution mode ──
       if (query && !path) {
         try {
-          const { stime, etime } = parseTimeRange(timeRange);
+          const { stime, etime } = parseQueryPeriod(timeRange);
           const result = await client.executePromql(projectCode, {
             query,
             stime,
@@ -1158,7 +1159,7 @@ export function registerYardTools(
       }
 
       try {
-        const { stime, etime } = parseTimeRange(timeRange);
+        const { stime, etime } = parseQueryPeriod(timeRange);
 
         // Local catalog priority: if raw MXQL exists in catalog, use text endpoint
         const catalogInfo = describeMql(path);
