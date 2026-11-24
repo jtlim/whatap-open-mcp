@@ -712,6 +712,61 @@ LIMIT 1`;
   }
 };
 
+// src/utils/time.ts
+var UNIT_MS = {
+  s: 1e3,
+  m: 6e4,
+  h: 36e5,
+  d: 864e5,
+  w: 6048e5
+};
+var UTC_INTERVAL_EXAMPLE = "2025-01-01T00:00:00.000Z/2025-01-01T00:15:00.000Z";
+var UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+function parseUtcTimestamp(value) {
+  if (!UTC_TIMESTAMP.test(value)) return NaN;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value ? timestamp : NaN;
+}
+function parseTimeRange(range) {
+  if (range.includes("/")) {
+    const endpoints = range.trim().split("/");
+    if (endpoints.length === 2) {
+      const stime = parseUtcTimestamp(endpoints[0]);
+      const etime2 = parseUtcTimestamp(endpoints[1]);
+      if (stime < etime2) return { stime, etime: etime2 };
+    }
+    throw new Error(
+      `Invalid time range format: use a UTC interval like "${UTC_INTERVAL_EXAMPLE}" with start before end.`
+    );
+  }
+  const etime = Date.now();
+  const trimmed = range.trim().toLowerCase();
+  const shortMatch = trimmed.match(/^(\d+)\s*([smhdw])$/);
+  if (shortMatch) {
+    const amount = parseInt(shortMatch[1], 10);
+    const unit = shortMatch[2];
+    const ms = amount * UNIT_MS[unit];
+    return { stime: etime - ms, etime };
+  }
+  const longMatch = trimmed.match(
+    /^(?:last\s+)?(\d+)\s+(second|minute|hour|day|week)s?$/
+  );
+  if (longMatch) {
+    const amount = parseInt(longMatch[1], 10);
+    const unit = longMatch[2];
+    const unitKey = unit === "second" ? "s" : unit === "minute" ? "m" : unit === "hour" ? "h" : unit === "day" ? "d" : "w";
+    const ms = amount * UNIT_MS[unitKey];
+    return { stime: etime - ms, etime };
+  }
+  throw new Error(
+    `Invalid time range format: "${range}". Use formats like "5m", "1h", "7d", or "last 30 minutes".`
+  );
+}
+function formatQueryPeriod({ stime, etime }) {
+  const format = (timestamp) => new Date(timestamp).toISOString().replace("T", " ").replace(/(?:\.000)?Z$/, " UTC");
+  return `**Period**: ${format(stime)} \u2192 ${format(etime)}`;
+}
+
 // src/utils/semantic.ts
 var ENTITY_LABELS = {
   agent: "agent",
@@ -15867,7 +15922,7 @@ function formatMxqlResponse(data, options = {}) {
     }
     if (queryMeta) {
       lines.push(
-        `**Period**: ${fmtTime(queryMeta.stime)} \u2192 ${fmtTime(queryMeta.etime)}`
+        formatQueryPeriod(queryMeta)
       );
     }
     if (semantics || queryMeta) lines.push("");
@@ -15933,7 +15988,7 @@ function formatMxqlResponse(data, options = {}) {
   } else if (data && typeof data === "object") {
     if (queryMeta) {
       lines.push(
-        `**Period**: ${fmtTime(queryMeta.stime)} \u2192 ${fmtTime(queryMeta.etime)}`,
+        formatQueryPeriod(queryMeta),
         ""
       );
     }
@@ -16102,7 +16157,7 @@ function computeSummaryStats(rows, headerTypes, rowCounts) {
 
 // src/utils/descriptions.ts
 var PARAM_PROJECT_CODE = "Project code (pcode). Get this by calling whatap_list_projects first \u2014 it returns all accessible projects with their pcodes.";
-var PARAM_TIME_RANGE_OPTIONAL = 'Time range (default: "5m"). Examples: "5m", "1h", "6h", "1d", "last 30 minutes".';
+var PARAM_TIME_RANGE_OPTIONAL = `Time range (default: "5m"). Examples: "5m", "1h", "6h", "1d", "last 30 minutes". For a fixed UTC interval use "${UTC_INTERVAL_EXAMPLE}".`;
 var PARAM_MXQL_PATH = 'MXQL query path from the yard (e.g., "v2/sys/server_base", "v2/app/tps_pcode"). Discover paths with whatap_data_availability.';
 var PARAM_SENSITIVITY = 'Anomaly detection sensitivity: "low" = only major issues (3\u03C3 threshold), "medium" = balanced (2\u03C3, default), "high" = catch subtle issues (1.5\u03C3).';
 var MXQL_PARAM_REGISTRY = {
@@ -16675,7 +16730,7 @@ function formatPromqlResponse(data, options = {}) {
   );
   if (queryMeta) {
     lines.push(
-      `**Period**: ${fmtTime2(queryMeta.stime)} \u2192 ${fmtTime2(queryMeta.etime)}`
+      formatQueryPeriod(queryMeta)
     );
   }
   lines.push("");
@@ -16795,39 +16850,6 @@ function fmtCell(v) {
   if (v === null || v === void 0) return "-";
   if (typeof v === "number") return fmtNum2(v);
   return String(v);
-}
-
-// src/utils/time.ts
-var UNIT_MS = {
-  s: 1e3,
-  m: 6e4,
-  h: 36e5,
-  d: 864e5,
-  w: 6048e5
-};
-function parseTimeRange(range) {
-  const etime = Date.now();
-  const trimmed = range.trim().toLowerCase();
-  const shortMatch = trimmed.match(/^(\d+)\s*([smhdw])$/);
-  if (shortMatch) {
-    const amount = parseInt(shortMatch[1], 10);
-    const unit = shortMatch[2];
-    const ms = amount * UNIT_MS[unit];
-    return { stime: etime - ms, etime };
-  }
-  const longMatch = trimmed.match(
-    /^(?:last\s+)?(\d+)\s+(second|minute|hour|day|week)s?$/
-  );
-  if (longMatch) {
-    const amount = parseInt(longMatch[1], 10);
-    const unit = longMatch[2];
-    const unitKey = unit === "second" ? "s" : unit === "minute" ? "m" : unit === "hour" ? "h" : unit === "day" ? "d" : "w";
-    const ms = amount * UNIT_MS[unitKey];
-    return { stime: etime - ms, etime };
-  }
-  throw new Error(
-    `Invalid time range format: "${range}". Use formats like "5m", "1h", "7d", or "last 30 minutes".`
-  );
 }
 
 // src/data/mxql-comment-translations.ts

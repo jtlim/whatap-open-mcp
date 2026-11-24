@@ -1,3 +1,5 @@
+import { UTC_INTERVAL_EXAMPLE } from "./time.js";
+
 // src/utils/descriptions.ts
 // Shared Zod .describe() constants reused across all tool files.
 
@@ -13,7 +15,8 @@ export const PARAM_TIME_RANGE =
 
 export const PARAM_TIME_RANGE_OPTIONAL =
   'Time range (default: "5m"). ' +
-  'Examples: "5m", "1h", "6h", "1d", "last 30 minutes".';
+  'Examples: "5m", "1h", "6h", "1d", "last 30 minutes".' +
+  ` For a fixed UTC interval use "${UTC_INTERVAL_EXAMPLE}".`;
 
 export const PARAM_MXQL_PATH =
   'MXQL query path from the yard (e.g., "v2/sys/server_base", "v2/app/tps_pcode"). ' +

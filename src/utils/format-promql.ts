@@ -2,6 +2,8 @@
 // Formatter for PromQL/OpenMetrics results.
 // Groups rows by label set and presents as labeled time series.
 
+import { formatQueryPeriod } from "./time.js";
+
 export interface PromqlFormatOptions {
   title?: string;
   maxRows?: number;
@@ -84,7 +86,7 @@ export function formatPromqlResponse(
   );
   if (queryMeta) {
     lines.push(
-      `**Period**: ${fmtTime(queryMeta.stime)} → ${fmtTime(queryMeta.etime)}`
+      formatQueryPeriod(queryMeta)
     );
   }
   lines.push("");
