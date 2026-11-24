@@ -10,6 +10,7 @@ export interface FormatOptions {
   title?: string;
   maxRows?: number;
   queryMeta?: {
+    exactPeriod?: boolean;
     stime: number;
     etime: number;
   };
@@ -108,7 +109,7 @@ export function formatMxqlResponse(
     // Period
     if (queryMeta) {
       lines.push(
-        `**Period**: ${fmtTime(queryMeta.stime)} → ${fmtTime(queryMeta.etime)}`
+        `**Period**: ${fmtTime(queryMeta.stime, queryMeta.exactPeriod)} → ${fmtTime(queryMeta.etime, queryMeta.exactPeriod)}`
       );
     }
 
@@ -199,7 +200,7 @@ export function formatMxqlResponse(
   } else if (data && typeof data === "object") {
     if (queryMeta) {
       lines.push(
-        `**Period**: ${fmtTime(queryMeta.stime)} → ${fmtTime(queryMeta.etime)}`,
+        `**Period**: ${fmtTime(queryMeta.stime, queryMeta.exactPeriod)} → ${fmtTime(queryMeta.etime, queryMeta.exactPeriod)}`,
         ""
       );
     }
@@ -424,8 +425,9 @@ function formatValue(v: unknown, field?: string): string {
   return String(v);
 }
 
-function fmtTime(ms: number): string {
-  return new Date(ms).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+function fmtTime(ms: number, exact = false): string {
+  const iso = new Date(ms).toISOString();
+  return exact ? iso : iso.replace("T", " ").slice(0, 19) + " UTC";
 }
 
 function fmtNum(n: number): string {

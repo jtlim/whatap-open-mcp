@@ -15867,7 +15867,7 @@ function formatMxqlResponse(data, options = {}) {
     }
     if (queryMeta) {
       lines.push(
-        `**Period**: ${fmtTime(queryMeta.stime)} \u2192 ${fmtTime(queryMeta.etime)}`
+        `**Period**: ${fmtTime(queryMeta.stime, queryMeta.exactPeriod)} \u2192 ${fmtTime(queryMeta.etime, queryMeta.exactPeriod)}`
       );
     }
     if (semantics || queryMeta) lines.push("");
@@ -15933,7 +15933,7 @@ function formatMxqlResponse(data, options = {}) {
   } else if (data && typeof data === "object") {
     if (queryMeta) {
       lines.push(
-        `**Period**: ${fmtTime(queryMeta.stime)} \u2192 ${fmtTime(queryMeta.etime)}`,
+        `**Period**: ${fmtTime(queryMeta.stime, queryMeta.exactPeriod)} \u2192 ${fmtTime(queryMeta.etime, queryMeta.exactPeriod)}`,
         ""
       );
     }
@@ -16052,8 +16052,9 @@ function formatValue(v, field) {
   if (typeof v === "object") return JSON.stringify(v);
   return String(v);
 }
-function fmtTime(ms) {
-  return new Date(ms).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+function fmtTime(ms, exact = false) {
+  const iso = new Date(ms).toISOString();
+  return exact ? iso : iso.replace("T", " ").slice(0, 19) + " UTC";
 }
 function fmtNum(n) {
   if (Number.isInteger(n)) return String(n);
@@ -16828,6 +16829,23 @@ function parseTimeRange(range) {
   throw new Error(
     `Invalid time range format: "${range}". Use formats like "5m", "1h", "7d", or "last 30 minutes".`
   );
+}
+function parseMxqlTimeRange(range) {
+  if (!range.includes("/")) return parseTimeRange(range);
+  const interval = range.trim().match(
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z)\/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z)$/
+  );
+  if (interval) {
+    const stime = parseUtcEndpoint(interval[1]);
+    const etime = parseUtcEndpoint(interval[2]);
+    if (stime < etime) return { stime, etime };
+  }
+  throw new Error("Invalid time range format: use an increasing ISO 8601 UTC start/end pair.");
+}
+function parseUtcEndpoint(endpoint) {
+  const time = Date.parse(endpoint);
+  const canonical = endpoint.includes(".") ? endpoint : endpoint.replace("Z", ".000Z");
+  return Number.isFinite(time) && new Date(time).toISOString() === canonical ? time : NaN;
 }
 
 // src/data/mxql-comment-translations.ts
@@ -47765,7 +47783,7 @@ Verify the metric exists: \`whatap_data_availability(projectCode=${projectCode})
       savedQuery: z.string().optional().describe(
         'Name of a saved PromQL query (created with whatap_create_promql). Example: "CPU by Pod"'
       ),
-      timeRange: z.string().default("5m").describe(PARAM_TIME_RANGE_OPTIONAL),
+      timeRange: z.string().default("5m").describe(PARAM_TIME_RANGE_OPTIONAL + " MXQL also accepts an ISO 8601 UTC start/end pair separated by a slash."),
       params: z.record(z.string()).optional().describe(
         'Query parameters for MXQL $-prefixed variables. Example: {"oid": "12345", "okind": "myApp"}'
       ),
@@ -47874,7 +47892,7 @@ Create new queries with \`whatap_create_promql\`.`
         };
       }
       try {
-        const { stime, etime } = parseTimeRange(timeRange);
+        const { stime, etime } = parseMxqlTimeRange(timeRange);
         const catalogInfo = describeMql(path);
         const rawMxql = catalogInfo?.raw;
         if (rawMxql) {
@@ -47974,7 +47992,7 @@ Create new queries with \`whatap_create_promql\`.`
         const text = formatMxqlResponse(result, {
           title: path,
           maxRows: limit,
-          queryMeta: { stime, etime },
+          queryMeta: { stime, etime, exactPeriod: timeRange.includes("/") },
           semantics: querySem,
           fieldGuide: baseCategory ? { category: baseCategory } : void 0
         });

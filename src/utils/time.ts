@@ -57,3 +57,27 @@ export function parseTimeRange(range: string): TimeRange {
       `Use formats like "5m", "1h", "7d", or "last 30 minutes".`
   );
 }
+
+/** Accepts a fixed UTC interval for an MXQL query, or a relative range. */
+export function parseMxqlTimeRange(range: string): TimeRange {
+  if (!range.includes("/")) return parseTimeRange(range);
+
+  const interval = range.trim().match(
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z)\/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z)$/
+  );
+  if (interval) {
+    const stime = parseUtcEndpoint(interval[1]);
+    const etime = parseUtcEndpoint(interval[2]);
+    if (stime < etime) return { stime, etime };
+  }
+
+  throw new Error("Invalid time range format: use an increasing ISO 8601 UTC start/end pair.");
+}
+
+function parseUtcEndpoint(endpoint: string): number {
+  const time = Date.parse(endpoint);
+  const canonical = endpoint.includes(".") ? endpoint : endpoint.replace("Z", ".000Z");
+  return Number.isFinite(time) && new Date(time).toISOString() === canonical
+    ? time
+    : NaN;
+}
