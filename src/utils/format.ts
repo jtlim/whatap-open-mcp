@@ -425,7 +425,9 @@ function formatValue(v: unknown, field?: string): string {
 }
 
 function fmtTime(ms: number): string {
-  return new Date(ms).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return `${ms} ms since epoch`;
+  return date.toISOString().replace("T", " ").split(".")[0] + " UTC";
 }
 
 function fmtNum(n: number): string {

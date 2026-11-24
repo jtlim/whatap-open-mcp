@@ -989,6 +989,21 @@ export function registerYardTools(
 
   // ── Tool 3: whatap_query_data ──
 
+  const epochMillis = (description: string) => {
+    const schema = z.number().optional().describe(description);
+    // The generic optional validator treats null as omitted.
+    schema.validate = (value) => {
+      if (
+        value === undefined ||
+        (typeof value === "number" && Number.isSafeInteger(value) && value > 0)
+      ) {
+        return { ok: true, value };
+      }
+      return { ok: false, error: "expected a positive safe integer in epoch milliseconds" };
+    };
+    return schema;
+  };
+
   server.tool(
     "whatap_query_data",
     "Execute a data query. Call this directly when you know the projectCode — no prerequisite tools needed.\n\n" +
@@ -1029,7 +1044,13 @@ export function registerYardTools(
       timeRange: z
         .string()
         .default("5m")
-        .describe(PARAM_TIME_RANGE_OPTIONAL),
+        .describe(PARAM_TIME_RANGE_OPTIONAL + " Used when stime and etime are omitted."),
+      stime: epochMillis(
+        "Absolute start time as a positive safe integer in epoch milliseconds. Provide with etime to override timeRange."
+      ),
+      etime: epochMillis(
+        "Absolute end time as a positive safe integer in epoch milliseconds. Must be greater than stime."
+      ),
       params: z
         .record(z.string())
         .optional()
@@ -1041,7 +1062,22 @@ export function registerYardTools(
         .default(100)
         .describe("Maximum rows to return (default: 100)."),
     },
-    async ({ projectCode, path, query, savedQuery, timeRange, params, limit }) => {
+    async ({ projectCode, path, query, savedQuery, timeRange, stime, etime, params, limit }) => {
+      let absoluteWindow: { stime: number; etime: number } | undefined;
+      if (stime !== undefined || etime !== undefined) {
+        if (stime === undefined || etime === undefined || stime >= etime) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: "**Error**: Provide both stime and etime with stime less than etime.",
+            }],
+            isError: true,
+          };
+        }
+        absoluteWindow = { stime, etime };
+        timeRange = `${stime} → ${etime} (epoch ms)`;
+      }
+
       // ── Resolve saved query ──
       if (savedQuery) {
         const saved = getPromqlQueryStore().get(projectCode, savedQuery);
@@ -1069,7 +1105,7 @@ export function registerYardTools(
       // ── PromQL execution mode ──
       if (query && !path) {
         try {
-          const { stime, etime } = parseTimeRange(timeRange);
+          const { stime, etime } = absoluteWindow ?? parseTimeRange(timeRange);
           const result = await client.executePromql(projectCode, {
             query,
             stime,
@@ -1128,6 +1164,7 @@ export function registerYardTools(
           });
 
           return {
+            structuredContent: { stime, etime },
             content: [
               {
                 type: "text" as const,
@@ -1158,7 +1195,7 @@ export function registerYardTools(
       }
 
       try {
-        const { stime, etime } = parseTimeRange(timeRange);
+        const { stime, etime } = absoluteWindow ?? parseTimeRange(timeRange);
 
         // Local catalog priority: if raw MXQL exists in catalog, use text endpoint
         const catalogInfo = describeMql(path);
@@ -1307,6 +1344,7 @@ export function registerYardTools(
           fieldGuide: baseCategory ? { category: baseCategory } : undefined,
         });
         return {
+          structuredContent: { stime, etime },
           content: [
             {
               type: "text" as const,
