@@ -57,3 +57,30 @@ export function parseTimeRange(range: string): TimeRange {
       `Use formats like "5m", "1h", "7d", or "last 30 minutes".`
   );
 }
+
+const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+
+function parseUtcTimestamp(value: string): number {
+  if (!UTC_TIMESTAMP.test(value)) return NaN;
+  const timestamp = Date.parse(value);
+  const canonical = value.includes(".") ? value : value.replace(/Z$/, ".000Z");
+  if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString() !== canonical) {
+    return NaN;
+  }
+  return timestamp;
+}
+
+/** Parses a relative duration or an explicit UTC start/end for whatap_query_data. */
+export function parseQueryTimeRange(range: string): TimeRange {
+  if (!range.includes("/")) return parseTimeRange(range);
+
+  const parts = range.trim().split("/");
+  const [stime, etime] = parts.map(parseUtcTimestamp);
+  if (parts.length !== 2 || !(stime < etime)) {
+    throw new Error(
+      'Invalid time range format: use an ascending UTC interval, e.g. ' +
+      '"2026-01-01T00:00:00Z/2026-01-01T00:15:00Z".'
+    );
+  }
+  return { stime, etime };
+}

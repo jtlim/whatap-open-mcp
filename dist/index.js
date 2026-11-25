@@ -16829,6 +16829,27 @@ function parseTimeRange(range) {
     `Invalid time range format: "${range}". Use formats like "5m", "1h", "7d", or "last 30 minutes".`
   );
 }
+var UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+function parseUtcTimestamp(value) {
+  if (!UTC_TIMESTAMP.test(value)) return NaN;
+  const timestamp = Date.parse(value);
+  const canonical = value.includes(".") ? value : value.replace(/Z$/, ".000Z");
+  if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString() !== canonical) {
+    return NaN;
+  }
+  return timestamp;
+}
+function parseQueryTimeRange(range) {
+  if (!range.includes("/")) return parseTimeRange(range);
+  const parts = range.trim().split("/");
+  const [stime, etime] = parts.map(parseUtcTimestamp);
+  if (parts.length !== 2 || !(stime < etime)) {
+    throw new Error(
+      'Invalid time range format: use an ascending UTC interval, e.g. "2026-01-01T00:00:00Z/2026-01-01T00:15:00Z".'
+    );
+  }
+  return { stime, etime };
+}
 
 // src/data/mxql-comment-translations.ts
 var MXQL_COMMENT_TRANSLATIONS = {
@@ -47765,7 +47786,9 @@ Verify the metric exists: \`whatap_data_availability(projectCode=${projectCode})
       savedQuery: z.string().optional().describe(
         'Name of a saved PromQL query (created with whatap_create_promql). Example: "CPU by Pod"'
       ),
-      timeRange: z.string().default("5m").describe(PARAM_TIME_RANGE_OPTIONAL),
+      timeRange: z.string().default("5m").describe(
+        PARAM_TIME_RANGE_OPTIONAL + ' For a fixed UTC interval, use "2026-01-01T00:00:00Z/2026-01-01T00:15:00Z".'
+      ),
       params: z.record(z.string()).optional().describe(
         'Query parameters for MXQL $-prefixed variables. Example: {"oid": "12345", "okind": "myApp"}'
       ),
@@ -47796,7 +47819,7 @@ Create new queries with \`whatap_create_promql\`.`
       }
       if (query && !path) {
         try {
-          const { stime, etime } = parseTimeRange(timeRange);
+          const { stime, etime } = parseQueryTimeRange(timeRange);
           const result = await client.executePromql(projectCode, {
             query,
             stime,
@@ -47874,7 +47897,7 @@ Create new queries with \`whatap_create_promql\`.`
         };
       }
       try {
-        const { stime, etime } = parseTimeRange(timeRange);
+        const { stime, etime } = parseQueryTimeRange(timeRange);
         const catalogInfo = describeMql(path);
         const rawMxql = catalogInfo?.raw;
         if (rawMxql) {
