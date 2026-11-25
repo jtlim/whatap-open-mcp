@@ -57,3 +57,31 @@ export function parseTimeRange(range: string): TimeRange {
       `Use formats like "5m", "1h", "7d", or "last 30 minutes".`
   );
 }
+
+const UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+
+function parseUtcInstant(input: string): number {
+  if (!UTC_INSTANT.test(input)) return NaN;
+  const ms = Date.parse(input);
+  const expected = input.includes(".") ? input : input.replace(/Z$/, ".000Z");
+  return Number.isFinite(ms) && new Date(ms).toISOString() === expected ? ms : NaN;
+}
+
+export function parseQueryWindow(input: string): TimeRange {
+  if (!input.includes("/")) return parseTimeRange(input);
+
+  const endpoints = input.trim().split("/");
+  if (endpoints.length === 2) {
+    const stime = parseUtcInstant(endpoints[0]);
+    const etime = parseUtcInstant(endpoints[1]);
+    if (stime < etime) return { stime, etime };
+  }
+  throw new Error(
+    'Invalid time range format: expected an increasing UTC interval such as ' +
+    '"2026-01-01T00:00:00Z/2026-01-01T00:15:00Z".'
+  );
+}
+
+export function formatPeriodEndpoint(ms: number): string {
+  return new Date(ms).toISOString().replace("T", " ").replace(/(?:\.000)?Z$/, " UTC");
+}

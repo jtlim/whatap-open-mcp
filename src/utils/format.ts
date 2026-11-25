@@ -6,6 +6,8 @@ import {
   buildSummaryGuidance,
 } from "./field-guide.js";
 
+import { formatPeriodEndpoint } from "./time.js";
+
 export interface FormatOptions {
   title?: string;
   maxRows?: number;
@@ -108,7 +110,7 @@ export function formatMxqlResponse(
     // Period
     if (queryMeta) {
       lines.push(
-        `**Period**: ${fmtTime(queryMeta.stime)} → ${fmtTime(queryMeta.etime)}`
+        `**Period**: ${formatPeriodEndpoint(queryMeta.stime)} → ${formatPeriodEndpoint(queryMeta.etime)}`
       );
     }
 
@@ -199,7 +201,7 @@ export function formatMxqlResponse(
   } else if (data && typeof data === "object") {
     if (queryMeta) {
       lines.push(
-        `**Period**: ${fmtTime(queryMeta.stime)} → ${fmtTime(queryMeta.etime)}`,
+        `**Period**: ${formatPeriodEndpoint(queryMeta.stime)} → ${formatPeriodEndpoint(queryMeta.etime)}`,
         ""
       );
     }

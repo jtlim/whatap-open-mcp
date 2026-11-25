@@ -15815,6 +15815,61 @@ function buildSummaryGuidance(category, fields) {
   return `**How to analyze**: ${text}`;
 }
 
+// src/utils/time.ts
+var UNIT_MS = {
+  s: 1e3,
+  m: 6e4,
+  h: 36e5,
+  d: 864e5,
+  w: 6048e5
+};
+function parseTimeRange(range) {
+  const etime = Date.now();
+  const trimmed = range.trim().toLowerCase();
+  const shortMatch = trimmed.match(/^(\d+)\s*([smhdw])$/);
+  if (shortMatch) {
+    const amount = parseInt(shortMatch[1], 10);
+    const unit = shortMatch[2];
+    const ms = amount * UNIT_MS[unit];
+    return { stime: etime - ms, etime };
+  }
+  const longMatch = trimmed.match(
+    /^(?:last\s+)?(\d+)\s+(second|minute|hour|day|week)s?$/
+  );
+  if (longMatch) {
+    const amount = parseInt(longMatch[1], 10);
+    const unit = longMatch[2];
+    const unitKey = unit === "second" ? "s" : unit === "minute" ? "m" : unit === "hour" ? "h" : unit === "day" ? "d" : "w";
+    const ms = amount * UNIT_MS[unitKey];
+    return { stime: etime - ms, etime };
+  }
+  throw new Error(
+    `Invalid time range format: "${range}". Use formats like "5m", "1h", "7d", or "last 30 minutes".`
+  );
+}
+var UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+function parseUtcInstant(input) {
+  if (!UTC_INSTANT.test(input)) return NaN;
+  const ms = Date.parse(input);
+  const expected = input.includes(".") ? input : input.replace(/Z$/, ".000Z");
+  return Number.isFinite(ms) && new Date(ms).toISOString() === expected ? ms : NaN;
+}
+function parseQueryWindow(input) {
+  if (!input.includes("/")) return parseTimeRange(input);
+  const endpoints = input.trim().split("/");
+  if (endpoints.length === 2) {
+    const stime = parseUtcInstant(endpoints[0]);
+    const etime = parseUtcInstant(endpoints[1]);
+    if (stime < etime) return { stime, etime };
+  }
+  throw new Error(
+    'Invalid time range format: expected an increasing UTC interval such as "2026-01-01T00:00:00Z/2026-01-01T00:15:00Z".'
+  );
+}
+function formatPeriodEndpoint(ms) {
+  return new Date(ms).toISOString().replace("T", " ").replace(/(?:\.000)?Z$/, " UTC");
+}
+
 // src/utils/format.ts
 function formatMxqlResponse(data, options = {}) {
   const { title, maxRows = 100, queryMeta, semantics } = options;
@@ -15867,7 +15922,7 @@ function formatMxqlResponse(data, options = {}) {
     }
     if (queryMeta) {
       lines.push(
-        `**Period**: ${fmtTime(queryMeta.stime)} \u2192 ${fmtTime(queryMeta.etime)}`
+        `**Period**: ${formatPeriodEndpoint(queryMeta.stime)} \u2192 ${formatPeriodEndpoint(queryMeta.etime)}`
       );
     }
     if (semantics || queryMeta) lines.push("");
@@ -15933,7 +15988,7 @@ function formatMxqlResponse(data, options = {}) {
   } else if (data && typeof data === "object") {
     if (queryMeta) {
       lines.push(
-        `**Period**: ${fmtTime(queryMeta.stime)} \u2192 ${fmtTime(queryMeta.etime)}`,
+        `**Period**: ${formatPeriodEndpoint(queryMeta.stime)} \u2192 ${formatPeriodEndpoint(queryMeta.etime)}`,
         ""
       );
     }
@@ -16675,7 +16730,7 @@ function formatPromqlResponse(data, options = {}) {
   );
   if (queryMeta) {
     lines.push(
-      `**Period**: ${fmtTime2(queryMeta.stime)} \u2192 ${fmtTime2(queryMeta.etime)}`
+      `**Period**: ${formatPeriodEndpoint(queryMeta.stime)} \u2192 ${formatPeriodEndpoint(queryMeta.etime)}`
     );
   }
   lines.push("");
@@ -16795,39 +16850,6 @@ function fmtCell(v) {
   if (v === null || v === void 0) return "-";
   if (typeof v === "number") return fmtNum2(v);
   return String(v);
-}
-
-// src/utils/time.ts
-var UNIT_MS = {
-  s: 1e3,
-  m: 6e4,
-  h: 36e5,
-  d: 864e5,
-  w: 6048e5
-};
-function parseTimeRange(range) {
-  const etime = Date.now();
-  const trimmed = range.trim().toLowerCase();
-  const shortMatch = trimmed.match(/^(\d+)\s*([smhdw])$/);
-  if (shortMatch) {
-    const amount = parseInt(shortMatch[1], 10);
-    const unit = shortMatch[2];
-    const ms = amount * UNIT_MS[unit];
-    return { stime: etime - ms, etime };
-  }
-  const longMatch = trimmed.match(
-    /^(?:last\s+)?(\d+)\s+(second|minute|hour|day|week)s?$/
-  );
-  if (longMatch) {
-    const amount = parseInt(longMatch[1], 10);
-    const unit = longMatch[2];
-    const unitKey = unit === "second" ? "s" : unit === "minute" ? "m" : unit === "hour" ? "h" : unit === "day" ? "d" : "w";
-    const ms = amount * UNIT_MS[unitKey];
-    return { stime: etime - ms, etime };
-  }
-  throw new Error(
-    `Invalid time range format: "${range}". Use formats like "5m", "1h", "7d", or "last 30 minutes".`
-  );
 }
 
 // src/data/mxql-comment-translations.ts
@@ -47765,7 +47787,9 @@ Verify the metric exists: \`whatap_data_availability(projectCode=${projectCode})
       savedQuery: z.string().optional().describe(
         'Name of a saved PromQL query (created with whatap_create_promql). Example: "CPU by Pod"'
       ),
-      timeRange: z.string().default("5m").describe(PARAM_TIME_RANGE_OPTIONAL),
+      timeRange: z.string().default("5m").describe(
+        PARAM_TIME_RANGE_OPTIONAL + ' For an absolute UTC window, use "2026-01-01T00:00:00Z/2026-01-01T00:15:00Z".'
+      ),
       params: z.record(z.string()).optional().describe(
         'Query parameters for MXQL $-prefixed variables. Example: {"oid": "12345", "okind": "myApp"}'
       ),
@@ -47796,7 +47820,7 @@ Create new queries with \`whatap_create_promql\`.`
       }
       if (query && !path) {
         try {
-          const { stime, etime } = parseTimeRange(timeRange);
+          const { stime, etime } = parseQueryWindow(timeRange);
           const result = await client.executePromql(projectCode, {
             query,
             stime,
@@ -47874,7 +47898,7 @@ Create new queries with \`whatap_create_promql\`.`
         };
       }
       try {
-        const { stime, etime } = parseTimeRange(timeRange);
+        const { stime, etime } = parseQueryWindow(timeRange);
         const catalogInfo = describeMql(path);
         const rawMxql = catalogInfo?.raw;
         if (rawMxql) {

@@ -6,7 +6,7 @@ import type { McpServer } from "../mcp/server.js";
 import type { WhatapApiClient } from "../api/client.js";
 import { formatMxqlResponse } from "../utils/format.js";
 import { formatPromqlResponse, formatOpenMetricsList } from "../utils/format-promql.js";
-import { parseTimeRange } from "../utils/time.js";
+import { parseQueryWindow } from "../utils/time.js";
 import {
   PARAM_PROJECT_CODE,
   PARAM_TIME_RANGE_OPTIONAL,
@@ -1029,7 +1029,10 @@ export function registerYardTools(
       timeRange: z
         .string()
         .default("5m")
-        .describe(PARAM_TIME_RANGE_OPTIONAL),
+        .describe(
+          PARAM_TIME_RANGE_OPTIONAL +
+          ' For an absolute UTC window, use "2026-01-01T00:00:00Z/2026-01-01T00:15:00Z".'
+        ),
       params: z
         .record(z.string())
         .optional()
@@ -1069,7 +1072,7 @@ export function registerYardTools(
       // ── PromQL execution mode ──
       if (query && !path) {
         try {
-          const { stime, etime } = parseTimeRange(timeRange);
+          const { stime, etime } = parseQueryWindow(timeRange);
           const result = await client.executePromql(projectCode, {
             query,
             stime,
@@ -1158,7 +1161,7 @@ export function registerYardTools(
       }
 
       try {
-        const { stime, etime } = parseTimeRange(timeRange);
+        const { stime, etime } = parseQueryWindow(timeRange);
 
         // Local catalog priority: if raw MXQL exists in catalog, use text endpoint
         const catalogInfo = describeMql(path);
