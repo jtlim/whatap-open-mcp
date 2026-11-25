@@ -171,3 +171,14 @@ describe('whatap_query_data — data still flows', () => {
     expect(text).not.toContain('No rows returned');
   });
 });
+
+describe('whatap_query_data — server metrics', () => {
+  it('preserves the CPU and memory measurements returned by the API', async () => {
+    const { callback } = setupTool([
+      { time: Date.UTC(2026, 0, 1), _id_: 'server-a', cpu: 24.69, memory_pused: 62.34 },
+    ]);
+    const result = await callback(args({ path: 'v2/sys/server_base' }));
+    expect(result.isError).not.toBe(true);
+    expect(result.content[0].text).toMatch(/\|\s*[^|]+\|[^\n]*\b24\.69\b[^\n]*\b62\.34\b/);
+  });
+});
